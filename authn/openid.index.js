@@ -11,31 +11,35 @@ var jwks;
 var config;
 
 exports.handler = (event, context, callback) => {
-  if (typeof jwks == 'undefined' || typeof discoveryDocument == 'undefined' || typeof config == 'undefined') {
-    config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+  if (typeof jwks == "undefined" || typeof discoveryDocument == "undefined" || typeof config == "undefined") {
+    config = JSON.parse(fs.readFileSync("config.json", "utf8"));
 
     // Get Discovery Document data
     console.log("Get discovery document data");
-    axios.get(config.DISCOVERY_DOCUMENT)
-      .then(function(response) {
+    axios
+      .get(config.DISCOVERY_DOCUMENT)
+      .then(function (response) {
         console.log(response);
 
         // Get jwks from discovery document url
         console.log("Get jwks from discovery document");
         discoveryDocument = response.data;
-        if (discoveryDocument.hasOwnProperty('jwks_uri')) {
-
+        if (discoveryDocument.hasOwnProperty("jwks_uri")) {
           // Get public key and verify JWT
-          axios.get(discoveryDocument.jwks_uri)
-            .then(function(response) {
+          axios
+            .get(discoveryDocument.jwks_uri)
+            .then(function (response) {
               console.log(response);
               jwks = response.data;
 
               // Callback to main function
               mainProcess(event, context, callback);
             })
-            .catch(function(error) {
+            .catch(function (error) {
               console.log("Internal server error: " + error.message);
+              console.log(error.response.data);
+              console.log(error.response.status);
+              console.log(error.response.headers);
               internalServerError(callback);
             });
         } else {
@@ -43,7 +47,7 @@ exports.handler = (event, context, callback) => {
           internalServerError(callback);
         }
       })
-      .catch(function(error) {
+      .catch(function (error) {
         console.log("Internal server error: " + error.message);
         internalServerError(callback);
       });
@@ -53,33 +57,32 @@ exports.handler = (event, context, callback) => {
 };
 
 function mainProcess(event, context, callback) {
-
   // Get request, request headers, and querystring dictionary
   const request = event.Records[0].cf.request;
   const headers = request.headers;
   const queryDict = qs.parse(request.querystring);
-  if (event.Records[0].cf.config.hasOwnProperty('test')) {
+  if (event.Records[0].cf.config.hasOwnProperty("test")) {
     config.AUTH_REQUEST.redirect_uri = event.Records[0].cf.config.test + config.CALLBACK_PATH;
     config.TOKEN_REQUEST.redirect_uri = event.Records[0].cf.config.test + config.CALLBACK_PATH;
   }
   if (request.uri.startsWith(config.CALLBACK_PATH)) {
-    console.log("Callback from OIDC provider received");
+    console.log("Callback from OIDC provider received: ", queryDict);
 
     // Check for error response (https://tools.ietf.org/html/rfc6749#section-4.2.2.1)
     if (queryDict.error) {
       const errors = {
-        "invalid_request": "Invalid Request",
-        "unauthorized_client": "Unauthorized Client",
-        "access_denied": "Access Denied",
-        "unsupported_response_type": "Unsupported Response Type",
-        "invalid_scope": "Invalid Scope",
-        "server_error": "Server Error",
-        "temporarily_unavailable": "Temporarily Unavailable"
-      }
+        invalid_request: "Invalid Request",
+        "return unauthorized_client": "return Unauthorized Client",
+        access_denied: "Access Denied",
+        unsupported_response_type: "Unsupported Response Type",
+        invalid_scope: "Invalid Scope",
+        server_error: "Server Error",
+        temporarily_unavailable: "Temporarily Unavailable",
+      };
 
-      var error = '';
-      var error_description = '';
-      var error_uri = '';
+      var error = "";
+      var error_description = "";
+      var error_uri = "";
 
       if (errors[queryDict.error] != null) {
         // Replace with corresponding value
@@ -92,32 +95,34 @@ function mainProcess(event, context, callback) {
       if (queryDict.error_description != null) {
         error_description = queryDict.error_description;
       } else {
-        error_description = '';
+        error_description = "";
       }
 
       if (queryDict.error_uri != null) {
         error_uri = queryDict.error_uri;
       } else {
-        error_uri = '';
+        error_uri = "";
       }
 
-      unauthorized(error, error_description, error_uri, callback);
+      return unauthorized(error, error_description, error_uri, callback);
     }
 
     // Verify code is in querystring
     if (!queryDict.code) {
-      unauthorized('No Code Found', '', '', callback);
+      return unauthorized("No Code Found", "", "", callback);
     }
+    console.log(`Code=${queryDict.code}`);
     config.TOKEN_REQUEST.code = queryDict.code;
 
     // Exchange code for authorization token
     const postData = qs.stringify(config.TOKEN_REQUEST);
     console.log("Requesting access token: " + discoveryDocument.token_endpoint, postData);
-    axios.post(discoveryDocument.token_endpoint, postData)
-      .then(function(response) {
-        console.log(response);
-        const decodedData = jwt.decode(response.data.id_token, {complete: true});
-        console.log(decodedData);
+    axios
+      .post(discoveryDocument.token_endpoint, postData)
+      .then(function (response) {
+        console.log("access token response: ", response.data);
+        const decodedData = jwt.decode(response.data.id_token, { complete: true });
+        console.log("decoded: ", decodedData);
         try {
           console.log("Searching for JWK from discovery document");
 
@@ -131,71 +136,78 @@ function mainProcess(event, context, callback) {
           console.log("Verifying JWT");
 
           // Verify the JWT, the payload email, and that the email ends with configured hosted domain
-          jwt.verify(response.data.id_token, pem, { algorithms: ['RS256'] }, function(err, decoded) {
+          jwt.verify(response.data.id_token, pem, { algorithms: ["RS256"] }, function (err, decoded) {
             if (err) {
               switch (err.name) {
-                case 'TokenExpiredError':
+                case "TokenExpiredError":
                   console.log("Token expired, redirecting to OIDC provider.");
-                  redirect(request, headers, callback)
+                  redirect(request, headers, callback);
                   break;
-                case 'JsonWebTokenError':
-                  console.log("JWT error, unauthorized.");
-                  unauthorized('Json Web Token Error', err.message, '', callback);
+                case "JsonWebTokenError":
+                  console.log("JWT error, return unauthorized.");
+                  return unauthorized("Json Web Token Error", err.message, "", callback);
                   break;
                 default:
-                  console.log("Unknown JWT error, unauthorized.");
-                  unauthorized('Unknown JWT', 'User ' + decodedData.payload.email + ' is not permitted.', '', callback);
+                  console.log(`Unknown JWT error ${err.name}, return unauthorized.`);
+                  return unauthorized("Unknown JWT", "User " + decodedData.payload.email + " is not permitted.", "", callback);
               }
             } else {
-
               // Validate nonce
-              if ("cookie" in headers
-                  && "NONCE" in cookie.parse(headers["cookie"][0].value)
-                  && nonce.validateNonce(decoded.nonce, cookie.parse(headers["cookie"][0].value).NONCE)) {
+              if (
+                "cookie" in headers &&
+                "NONCE" in cookie.parse(headers["cookie"][0].value) &&
+                nonce.validateNonce(decoded.nonce, cookie.parse(headers["cookie"][0].value).NONCE)
+              ) {
                 console.log("Setting cookie and redirecting.");
 
                 // Once verified, create new JWT for this server
                 const response = {
-                  "status": "302",
-                  "statusDescription": "Found",
-                  "body": "ID token retrieved.",
-                  "headers": {
-                    "location" : [
+                  status: "302",
+                  statusDescription: "Found",
+                  body: "ID token retrieved.",
+                  headers: {
+                    location: [
                       {
-                        "key": "Location",
-                        "value": event.Records[0].cf.config.hasOwnProperty('test') ? (config.AUTH_REQUEST.redirect_uri + queryDict.state) : queryDict.state
-                      }
+                        key: "Location",
+                        value: event.Records[0].cf.config.hasOwnProperty("test")
+                          ? config.AUTH_REQUEST.redirect_uri + queryDict.state
+                          : queryDict.state,
+                      },
                     ],
-                    "set-cookie" : [
+                    "set-cookie": [
                       {
-                        "key": "Set-Cookie",
-                        "value" : cookie.serialize('TOKEN', jwt.sign(
-                          { },
-                          config.PRIVATE_KEY.trim(),
+                        key: "Set-Cookie",
+                        value: cookie.serialize(
+                          "TOKEN",
+                          jwt.sign(
+                            {},
+                            config.PRIVATE_KEY.trim(),
+                            {
+                              audience: headers.host[0].value,
+                              subject: auth.getSubject(decodedData),
+                              expiresIn: config.SESSION_DURATION,
+                              algorithm: "RS256",
+                            }, // Options
+                          ),
                           {
-                            "audience": headers.host[0].value,
-                            "subject": auth.getSubject(decodedData),
-                            "expiresIn": config.SESSION_DURATION,
-                            "algorithm": "RS256"
-                          } // Options
-                        ), {
-                          path: '/',
-                          maxAge: config.SESSION_DURATION
-                        })
+                            path: "/",
+                            maxAge: config.SESSION_DURATION,
+                          },
+                        ),
                       },
                       {
-                        "key": "Set-Cookie",
-                        "value" : cookie.serialize('NONCE', '', {
-                          path: '/',
-                          expires: new Date(1970, 1, 1, 0, 0, 0, 0)
-                        })
-                      }
+                        key: "Set-Cookie",
+                        value: cookie.serialize("NONCE", "", {
+                          path: "/",
+                          expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+                        }),
+                      },
                     ],
                   },
                 };
                 callback(null, response);
               } else {
-                unauthorized('Nonce Verification Failed', '', '', callback);
+                return unauthorized("Nonce Verification Failed", "", "", callback);
               }
             }
           });
@@ -204,35 +216,39 @@ function mainProcess(event, context, callback) {
           internalServerError(callback);
         }
       })
-      .catch(function(error) {
+      .catch(function (error) {
         console.log("Internal server error: " + error.message);
         internalServerError(callback);
       });
-  } else if ("cookie" in headers
-              && "TOKEN" in cookie.parse(headers["cookie"][0].value)) {
+  } else if ("cookie" in headers && "TOKEN" in cookie.parse(headers["cookie"][0].value)) {
     console.log("Request received with TOKEN cookie. Validating.");
 
     // Verify the JWT, the payload email, and that the email ends with configured hosted domain
-    jwt.verify(cookie.parse(headers["cookie"][0].value).TOKEN, config.PUBLIC_KEY.trim(), { algorithms: ['RS256'] }, function(err, decoded) {
-      if (err) {
-        switch (err.name) {
-          case 'TokenExpiredError':
-            console.log("Token expired, redirecting to OIDC provider.");
-            redirect(request, headers, callback)
-            break;
-          case 'JsonWebTokenError':
-            console.log("JWT error, unauthorized.");
-            unauthorized('Json Web Token Error', err.message, '', callback);
-            break;
-          default:
-            console.log("Unknown JWT error, unauthorized.");
-            unauthorized('Unauthorized.', 'User ' + decoded.sub + ' is not permitted.', '', callback);
+    jwt.verify(
+      cookie.parse(headers["cookie"][0].value).TOKEN,
+      config.PUBLIC_KEY.trim(),
+      { algorithms: ["RS256"] },
+      function (err, decoded) {
+        if (err) {
+          switch (err.name) {
+            case "TokenExpiredError":
+              console.log("Token expired, redirecting to OIDC provider.");
+              redirect(request, headers, callback);
+              break;
+            case "JsonWebTokenError":
+              console.log("JWT error, return unauthorized.");
+              return unauthorized("Json Web Token Error", err.message, "", callback);
+              break;
+            default:
+              console.log("Unknown JWT error, return unauthorized.");
+              return unauthorized("return Unauthorized.", "User " + decoded.sub + " is not permitted.", "", callback);
+          }
+        } else {
+          console.log("Authorizing user.");
+          auth.isAuthorized(decoded, request, callback, unauthorized, internalServerError, config);
         }
-      } else {
-        console.log("Authorizing user.");
-        auth.isAuthorized(decoded, request, callback, unauthorized, internalServerError, config);
-      }
-    });
+      },
+    );
   } else {
     console.log("Redirecting to OIDC provider.");
     redirect(request, headers, callback);
