@@ -112,7 +112,7 @@ function mainProcess(event, context, callback) {
 
     // Exchange code for authorization token
     const postData = qs.stringify(config.TOKEN_REQUEST);
-    console.log("Requesting access token.");
+    console.log("Requesting access token: " + discoveryDocument.token_endpoint, postData);
     axios.post(discoveryDocument.token_endpoint, postData)
       .then(function(response) {
         console.log(response);
