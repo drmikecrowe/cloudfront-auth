@@ -19,7 +19,7 @@ exports.handler = (event, context, callback) => {
     axios
       .get(config.DISCOVERY_DOCUMENT)
       .then(function (response) {
-        console.log(response);
+        console.log("DISCOVERY_DOCUMENT: ", JSON.stringify(response.data, null, 4));
 
         // Get jwks from discovery document url
         console.log("Get jwks from discovery document");
@@ -29,7 +29,7 @@ exports.handler = (event, context, callback) => {
           axios
             .get(discoveryDocument.jwks_uri)
             .then(function (response) {
-              console.log(response);
+              console.log("jwks data: ", JSON.stringify(response.data, null, 4));
               jwks = response.data;
 
               // Callback to main function
