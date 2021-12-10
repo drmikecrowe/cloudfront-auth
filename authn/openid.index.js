@@ -1,11 +1,13 @@
-const qs = require('querystring');
-const fs = require('fs');
-const jwt = require('jsonwebtoken');
-const cookie = require('cookie');
-const jwkToPem = require('jwk-to-pem');
-const auth = require('./auth.js');
-const nonce = require('./nonce.js');
-const axios = require('axios');
+const qs = require("querystring");
+const fs = require("fs");
+const jwt = require("jsonwebtoken");
+const cookie = require("cookie");
+const jwkToPem = require("jwk-to-pem");
+const auth = require("./auth.js");
+const nonce = require("./nonce.js");
+const axios = require("axios");
+const { inspect } = require("util");
+
 var discoveryDocument;
 var jwks;
 var config;
@@ -19,7 +21,7 @@ exports.handler = (event, context, callback) => {
     axios
       .get(config.DISCOVERY_DOCUMENT)
       .then(function (response) {
-        console.log("DISCOVERY_DOCUMENT: ", JSON.stringify(response.data, null, 4));
+        console.log("DISCOVERY_DOCUMENT: ", inspect(response.data, { depth: 5 }));
 
         // Get jwks from discovery document url
         console.log("Get jwks from discovery document");
@@ -29,7 +31,8 @@ exports.handler = (event, context, callback) => {
           axios
             .get(discoveryDocument.jwks_uri)
             .then(function (response) {
-              console.log("jwks data: ", JSON.stringify(response.data, null, 4));
+              console.log("jwks data: ", inspect(response.data, { depth: 5 }));
+              console.log("event", inspect(event, { depth: 5 }));
               jwks = response.data;
 
               // Callback to main function
@@ -66,7 +69,7 @@ function mainProcess(event, context, callback) {
     config.TOKEN_REQUEST.redirect_uri = event.Records[0].cf.config.test + config.CALLBACK_PATH;
   }
   if (request.uri.startsWith(config.CALLBACK_PATH)) {
-    console.log("Callback from OIDC provider received: ", queryDict);
+    console.log("Callback from OIDC provider received: ", inspect(request, { depth: 5 }));
 
     // Check for error response (https://tools.ietf.org/html/rfc6749#section-4.2.2.1)
     if (queryDict.error) {
@@ -121,7 +124,9 @@ function mainProcess(event, context, callback) {
       .post(discoveryDocument.token_endpoint, postData)
       .then(function (response) {
         console.log("access token response: ", response.data);
-        const decodedData = jwt.decode(response.data.id_token, { complete: true });
+        const decodedData = jwt.decode(response.data.id_token, {
+          complete: true,
+        });
         console.log("decoded: ", decodedData);
         try {
           console.log("Searching for JWK from discovery document");
@@ -264,29 +269,31 @@ function redirect(request, headers, callback) {
   var querystring = qs.stringify(config.AUTH_REQUEST);
 
   const response = {
-    "status": "302",
-    "statusDescription": "Found",
-    "body": "Redirecting to OIDC provider",
-    "headers": {
-      "location" : [{
-        "key": "Location",
-        "value": discoveryDocument.authorization_endpoint + '?' + querystring
-      }],
-      "set-cookie" : [
+    status: "302",
+    statusDescription: "Found",
+    body: "Redirecting to OIDC provider",
+    headers: {
+      location: [
         {
-          "key": "Set-Cookie",
-          "value" : cookie.serialize('TOKEN', '', {
-            path: '/',
-            expires: new Date(1970, 1, 1, 0, 0, 0, 0)
-          })
+          key: "Location",
+          value: discoveryDocument.authorization_endpoint + "?" + querystring,
+        },
+      ],
+      "set-cookie": [
+        {
+          key: "Set-Cookie",
+          value: cookie.serialize("TOKEN", "", {
+            path: "/",
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
         },
         {
-          "key": "Set-Cookie",
-          "value" : cookie.serialize('NONCE', n[1], {
-            path: '/',
-            httpOnly: true
-          })
-        }
+          key: "Set-Cookie",
+          value: cookie.serialize("NONCE", n[1], {
+            path: "/",
+            httpOnly: true,
+          }),
+        },
       ],
     },
   };
@@ -316,25 +323,25 @@ function unauthorized(error, error_description, error_uri, callback) {
 
   // Unauthorized access attempt. Reset token and nonce cookies
   const response = {
-    "status": "401",
-    "statusDescription": "Unauthorized",
-    "body": page,
-    "headers": {
-      "set-cookie" : [
+    status: "401",
+    statusDescription: "Unauthorized",
+    body: page,
+    headers: {
+      "set-cookie": [
         {
-          "key": "Set-Cookie",
-          "value" : cookie.serialize('TOKEN', '', {
-            path: '/',
-            expires: new Date(1970, 1, 1, 0, 0, 0, 0)
-          })
+          key: "Set-Cookie",
+          value: cookie.serialize("TOKEN", "", {
+            path: "/",
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
         },
         {
-          "key": "Set-Cookie",
-          "value" : cookie.serialize('NONCE', '', {
-            path: '/',
-            expires: new Date(1970, 1, 1, 0, 0, 0, 0)
-          })
-        }
+          key: "Set-Cookie",
+          value: cookie.serialize("NONCE", "", {
+            path: "/",
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
       ],
     },
   };
@@ -359,9 +366,9 @@ function internalServerError(callback) {
   `;
 
   const response = {
-    "status": "500",
-    "statusDescription": "Internal Server Error",
-    "body": page,
+    status: "500",
+    statusDescription: "Internal Server Error",
+    body: page,
   };
   callback(null, response);
 }
